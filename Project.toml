@@ -18,14 +18,8 @@ Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 [compat]
 CUDA = "3, 4, 5"
 ChainRulesCore = "1"
-Distributions = "0.25"
-ForwardDiff = "0.10"
-OneHotArrays = "0.2"
-NNlib = "0.9"
-SliceMap = "0.2"
-Statistics = "1.10"
-Zygote = "0.6"
-julia = "1.8"
+ForwardDiff = "0.10, 1"
+Zygote = "0.6, 0.7"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
