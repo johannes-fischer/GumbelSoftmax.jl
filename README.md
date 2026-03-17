@@ -21,11 +21,11 @@ Pkg.add("GumbelSoftmax")
 
 # 2. Usage
 
-The expected input shape is `(latent_dimension, categorical_dimension, batch_dimension)`. As an example, let's suppose we have 4 Categorical distributions with 3 classes and we want to sample 10 times. In this case, `latent_dimension=4`, `categorical_dimension=3`, and `batch_dimension=10`.
+The expected input shape is `(categorical_dimension, batch_dimensions...)`. As an example, let's suppose we have 4 Categorical distributions with 3 classes and we want to sample 10 times. In this case, `categorical_dimension=3` and the remaining dimensions are batch: `(4, 10)`.
 
 ```julia
 using GumbelSoftmax, Random
-logits = randn(4, 3, 10)
+logits = randn(3, 4, 10)
 samples = sample_gumbel_softmax(logits=logits, tau=0.1, hard=true)
 # or with Rao-Blackwellization
 k = 10 # number of Monte-Carlo samples

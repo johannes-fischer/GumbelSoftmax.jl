@@ -25,14 +25,13 @@ categorical distribution. It is defined as follows:
 
 where tau is a temperature parameter that controls the smoothness of the distribution. The expected inputs are
 either `probs` or `logits`. If `logits` is not provided, it is computed as `log(probs + epsilon)` where `epsilon`
-is a small value to avoid numerical instability. The expected shape of `logits` is `(latent_dimension, categorial_dimension, batch_dimension)` to
-keep it consistent with Flux.
+is a small value to avoid numerical instability. The expected shape of `logits` is `(categorical_dimension, batch_dimensions...)`.
 For example
 
 ```julia
-logits = randn(30, 10, 64) # here we are sampling 64 batches. Each batch has 30 categorical distributions with 10 classes each.
+logits = randn(10, 30, 64) # 10 classes, 30 distributions, batch of 64
 z = sample_gumbel_softmax(logits=logits, tau=0.5)
-sizeof(z) # (30, 10, 64)
+sizeof(z) # (10, 30, 64)
 ```
 The result one be one-hot encoded if `hard` is set to `true`. If `hard` is set to `false`, the result will be the soft output of the Softmax.
 """
@@ -43,9 +42,9 @@ function sample_gumbel_softmax(; probs = nothing, logits = nothing, tau = 0.1, h
         logits = log.(probs .+ epsilon)
     end
     y = logits + sample_gumbel(logits, size(logits), epsilon = epsilon)
-    y_soft = softmax(y / tau, dims = 2)
+    y_soft = softmax(y / tau, dims=1)
     if hard
-        y_hard = (y_soft .== maximum(y_soft, dims = 2))
+        y_hard = (y_soft .== maximum(y_soft, dims = 1))
         ret = y_hard - stop_gradient(y_soft) + y_soft
     else
         ret = y_soft

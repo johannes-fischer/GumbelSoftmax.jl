@@ -1,7 +1,7 @@
 ##
 using Pkg
 Pkg.activate("examples")
-using Distributions, GumbelSoftmax, Flux, MLDatasets, Statistics, ProgressMeter, PyPlot
+using Distributions, GumbelSoftmax, CUDA, cuDNN, Flux, MLDatasets, Statistics, ProgressMeter, Plots
 
 ##
 # parameters
@@ -31,13 +31,12 @@ decoder = Chain(
 ) |> device
 
 ##
-function run_model(encoder, decoder, x, latent_dim, categorical_dim)
+function run_model(encoder, decoder, x, latent_dim, categorical_dim; sampler=sample_gumbel_softmax)
     q = encoder(x)
-    q_unflatten = reshape(q, latent_dim, categorical_dim, :)
-    z = sample_gumbel_softmax(logits=q_unflatten, tau=0.5)
-    #z = sample_rao_gumbel_softmax(logits=q_unflatten |> cpu, tau=0.5, k=10) |> device
+    q_unflatten = reshape(q, categorical_dim, latent_dim, :)
+    z = sampler(logits=q_unflatten, tau=0.5)
     z = reshape(z, latent_dim * categorical_dim, :)
-    return decoder(z), reshape(softmax(q_unflatten, dims=2), latent_dim * categorical_dim, :)
+    return decoder(z), reshape(softmax(q_unflatten), categorical_dim * latent_dim, :)
 end
 
 function compute_loss(x, x_reconstructed, latent_z)
@@ -47,56 +46,69 @@ function compute_loss(x, x_reconstructed, latent_z)
     return bce + kld
 end
 
-function train(encoder, decoder, xtrain, nepochs)
+function train(encoder, decoder, xtrain, nepochs; sampler=sample_gumbel_softmax)
     loader = Flux.DataLoader((xtrain), batchsize=64, shuffle=true)
-    optim = Flux.Optimise.Adam(1e-3)
+    opt = Flux.Adam(1e-3)
+    enc_state = Flux.setup(opt, encoder)
+    dec_state = Flux.setup(opt, decoder)
     losses = []
-    trainable_params = Flux.params(encoder, decoder)
     @showprogress for epoch in 1:nepochs
         for x in loader
-            loss, back = Flux.pullback(trainable_params) do
-                z_decoded, z_soft = run_model(encoder, decoder, x, latent_dim, categorical_dim)
+            grads = Flux.gradient(encoder, decoder) do enc, dec
+                z_decoded, z_soft = run_model(enc, dec, x, latent_dim, categorical_dim; sampler=sampler)
                 compute_loss(x, z_decoded, z_soft)
             end
-            gradients = back(1.0f0)
-            Flux.Optimise.update!(optim, trainable_params, gradients)
+            Flux.update!(enc_state, encoder, grads[1])
+            Flux.update!(dec_state, decoder, grads[2])
+            loss = let
+                z_decoded, z_soft = run_model(encoder, decoder, x, latent_dim, categorical_dim; sampler=sampler)
+                compute_loss(x, z_decoded, z_soft)
+            end
             push!(losses, loss)
         end
     end
     return losses
 end
 ##
+# Train two models for comparison
+println("Training with Gumbel-Softmax...")
+encoder_gs = Chain(
+    Dense(28^2, 512, relu),
+    Dense(512, 256, relu),
+    Dense(256, latent_dim * categorical_dim, relu),
+) |> device
+decoder_gs = Chain(
+    Dense(latent_dim * categorical_dim, 256, relu),
+    Dense(256, 512, relu),
+    Dense(512, input_dim, sigmoid),
+) |> device
 
-losses = train(encoder, decoder, xtrain_flat, 10);
+losses_gs = train(encoder_gs, decoder_gs, xtrain_flat, 10; sampler=sample_gumbel_softmax)
 
 ##
-# plot loss
-fig, ax = plt.subplots()
-ax.plot(losses)
-ax.set_xlabel("Epoch")
-ax.set_ylabel("Loss")
-fig.savefig("examples/img/losses.png", bbox_inches="tight")
-fig
+# plot loss comparison
+p_loss = plot(losses_gs, label="Gumbel-Softmax", xlabel="Iteration", ylabel="Loss", title="VAE Loss Comparison", lw=2)
+savefig(p_loss, "examples/img/losses.png")
+p_loss
 ##
 
-# plot reconstruction examples
+# plot reconstruction examples (Gumbel-Softmax)
 n_examples = 10
-fig, ax = plt.subplots(n_examples, 2, figsize=(2, 5))
-# plot original images on the left and reconstructed images on the right
+plots_list_gs = []
 for i in 1:n_examples
     xt = xtest[:, :, i]
-    ax[i, 1].imshow(transpose(xt), cmap="gray")
+    p_orig = heatmap(transpose(xt), color=:grays, axis=false, title=(i == 1 ? "Original" : ""))
+    push!(plots_list_gs, p_orig)
+
     xt_flat = reshape(xt, input_dim, 1) |> device
-    x_reconsructed = run_model(encoder, decoder, xt_flat, latent_dim, categorical_dim)[1]
+    x_reconsructed = run_model(encoder_gs, decoder_gs, xt_flat, latent_dim, categorical_dim; sampler=sample_gumbel_softmax)[1]
     x_reconsructed = reshape(x_reconsructed |> cpu, 28, 28)
-    ax[i, 2].imshow(transpose(x_reconsructed), cmap="gray")
+    p_recon = heatmap(transpose(x_reconsructed), color=:grays, axis=false, title=(i == 1 ? "Gumbel Recon" : ""))
+    push!(plots_list_gs, p_recon)
 end
-# set titles
-ax[1, 1].set_title("Original", fontsize=8)
-ax[1, 2].set_title("Reconstructed", fontsize=8)
-# remove axis
-for a in ax
-    a.axis("off")
+fig_recon_gs = plot(plots_list_gs..., layout=(n_examples, 2), size=(200, 500))
+savefig(fig_recon_gs, "examples/img/reconstructed_gumbel.png")
+fig_recon_gs
 end
 plt.subplots_adjust(wspace=0.1, hspace=0.01)
 fig.savefig("examples/img/reconstructed.png", bbox_inches="tight")
@@ -111,19 +123,17 @@ M = n_samples * latent_dim
 samples = rand(Categorical(0.1 ./ ones(categorical_dim)), M)
 samples_oh = Float32.(reduce(hcat, Flux.onehot.(samples, Ref(1:categorical_dim))))
 samples_oh = reshape(samples_oh, latent_dim * categorical_dim, n_samples) |> device
-samples_decoded = decoder(samples_oh)
-samples_decoded = reshape(samples_decoded |> cpu, 28, 28, n_samples)
+samples_decoded_gs = decoder_gs(samples_oh)
+samples_decoded_gs = reshape(samples_decoded_gs |> cpu, 28, 28, n_samples)
 
-
-fig, ax = plt.subplots(8, 8, figsize=(8, 8))
+plots_gen_gs = []
 for index in 1:n_samples
-    i = Int(ceil(index / 8))
-    j = index % 8
-    if j == 0
-        j = 8
-    end
-    ax[i, j].imshow(transpose(samples_decoded[:, :, index]), cmap="gray")
-    ax[i, j].axis("off")
+    p_gen = heatmap(transpose(samples_decoded_gs[:, :, index]), color=:grays, axis=false)
+    push!(plots_gen_gs, p_gen)
+end
+fig_gen_gs = plot(plots_gen_gs..., layout=(8, 8), size=(800, 800))
+savefig(fig_gen_gs, "examples/img/generated_gumbel.png")
+fig_gen_gs
 end
 fig.savefig("examples/img/generated.png", bbox_inches="tight")
 fig
