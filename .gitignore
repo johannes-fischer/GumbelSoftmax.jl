@@ -6,3 +6,5 @@
 Manifest.toml
 *.png
 *.jls
+
+.claude
