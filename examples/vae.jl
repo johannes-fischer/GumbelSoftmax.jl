@@ -85,9 +85,24 @@ decoder_gs = Chain(
 
 losses_gs = train(encoder_gs, decoder_gs, xtrain_flat, 10; sampler=sample_gumbel_softmax)
 
+println("\nTraining with Softmax baseline (no Gumbel noise)...")
+encoder_s = Chain(
+    Dense(28^2, 512, relu),
+    Dense(512, 256, relu),
+    Dense(256, latent_dim * categorical_dim, relu),
+) |> device
+decoder_s = Chain(
+    Dense(latent_dim * categorical_dim, 256, relu),
+    Dense(256, 512, relu),
+    Dense(512, input_dim, sigmoid),
+) |> device
+
+losses_s = train(encoder_s, decoder_s, xtrain_flat, 10; sampler=sample_softmax)
+
 ##
 # plot loss comparison
 p_loss = plot(losses_gs, label="Gumbel-Softmax", xlabel="Iteration", ylabel="Loss", title="VAE Loss Comparison", lw=2)
+plot!(p_loss, losses_s, label="Softmax (baseline)", lw=2)
 savefig(p_loss, "examples/img/losses.png")
 p_loss
 ##
@@ -109,15 +124,28 @@ end
 fig_recon_gs = plot(plots_list_gs..., layout=(n_examples, 2), size=(200, 500))
 savefig(fig_recon_gs, "examples/img/reconstructed_gumbel.png")
 fig_recon_gs
+##
+
+# plot reconstruction examples (Softmax baseline)
+plots_list_s = []
+for i in 1:n_examples
+    xt = xtest[:, :, i]
+    p_orig = heatmap(transpose(xt), color=:grays, axis=false, title=(i == 1 ? "Original" : ""))
+    push!(plots_list_s, p_orig)
+
+    xt_flat = reshape(xt, input_dim, 1) |> device
+    x_reconsructed = run_model(encoder_s, decoder_s, xt_flat, latent_dim, categorical_dim; sampler=sample_softmax)[1]
+    x_reconsructed = reshape(x_reconsructed |> cpu, 28, 28)
+    p_recon = heatmap(transpose(x_reconsructed), color=:grays, axis=false, title=(i == 1 ? "Softmax Recon" : ""))
+    push!(plots_list_s, p_recon)
 end
-plt.subplots_adjust(wspace=0.1, hspace=0.01)
-fig.savefig("examples/img/reconstructed.png", bbox_inches="tight")
-fig
+fig_recon_s = plot(plots_list_s..., layout=(n_examples, 2), size=(200, 500))
+savefig(fig_recon_s, "examples/img/reconstructed_softmax.png")
+fig_recon_s
 ##
 
 ##
-# plot sampled examples
-# sample from categorical distribution and decode
+# plot sampled examples (Gumbel-Softmax)
 n_samples = 64
 M = n_samples * latent_dim
 samples = rand(Categorical(0.1 ./ ones(categorical_dim)), M)
@@ -134,7 +162,17 @@ end
 fig_gen_gs = plot(plots_gen_gs..., layout=(8, 8), size=(800, 800))
 savefig(fig_gen_gs, "examples/img/generated_gumbel.png")
 fig_gen_gs
+
+##
+# plot sampled examples (Softmax baseline)
+samples_decoded_s = decoder_s(samples_oh)
+samples_decoded_s = reshape(samples_decoded_s |> cpu, 28, 28, n_samples)
+
+plots_gen_s = []
+for index in 1:n_samples
+    p_gen = heatmap(transpose(samples_decoded_s[:, :, index]), color=:grays, axis=false)
+    push!(plots_gen_s, p_gen)
 end
-fig.savefig("examples/img/generated.png", bbox_inches="tight")
-fig
-#
+fig_gen_s = plot(plots_gen_s..., layout=(8, 8), size=(800, 800))
+savefig(fig_gen_s, "examples/img/generated_softmax.png")
+fig_gen_s
