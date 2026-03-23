@@ -33,7 +33,7 @@ logits = randn(10, 30, 64) # 10 classes, 30 distributions, batch of 64
 z = sample_gumbel_softmax(logits=logits, tau=0.5)
 sizeof(z) # (10, 30, 64)
 ```
-The result one be one-hot encoded if `hard` is set to `true`. If `hard` is set to `false`, the result will be the soft output of the Softmax.
+The result will be one-hot encoded if `hard` is set to `true`. If `hard` is set to `false`, the result will be the soft output of the Softmax.
 """
 function sample_gumbel_softmax(; probs = nothing, logits = nothing, tau = 0.1, hard = true, epsilon = 1e-10)
     tau = Float32(tau)
