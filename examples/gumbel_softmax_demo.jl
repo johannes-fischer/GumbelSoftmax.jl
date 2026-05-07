@@ -9,20 +9,21 @@ using GumbelSoftmax, Statistics, Plots, NNlib, Zygote
 
 # Generate random logits
 # Shape: (categorical_dim=5, batch_size=10)
-logits = randn(5, 10)
+N = 1000
+logits = repeat(randn(5,1), 1, N)
 
 # Different temperature values to explore
-temperatures = [0.001, 0.01, 0.1, 1.0, 10.0, 100.]
+temperatures = [0.1, 0.4, 0.7, 1.0, 3.0, 10.0]
+# temperatures = [0.03, 0.1, 0.3, 1.0, 3.0, 10.0]
 
-# Compute standard softmax (baseline)
-softmax_result = softmax(logits)
-softmax_mean = mean(softmax_result, dims=2)[:, 1]
+# Compute standard softmax (baseline, no temperature — Gumbel-Softmax converges to this in expectation)
+plain_softmax_mean = mean(softmax(logits), dims=2)[:, 1]
 
 println("Gumbel-Softmax Temperature Demo")
 println("=" ^ 50)
 println("\nLogits shape: $(size(logits))")
 println("Temperature values: $temperatures")
-println("\nStandard softmax probabilities: $softmax_mean\n")
+println("\nStandard softmax probabilities: $plain_softmax_mean\n")
 
 # Create visualization with Plots.jl
 plt = plot(layout=(2, 3), size=(1200, 800))
@@ -38,22 +39,27 @@ for (idx, tau) in enumerate(temperatures)
     gumbel_mean = mean(gumbel_samples, dims=2)[:, 1]
 
     x = collect(1:5)
-    w = 0.35
+    w = 0.27
 
-    bar!(plt, x .- w/2, softmax_mean[:]; bar_width=w, label="Softmax",
+    bar!(plt, x .- w, plain_softmax_mean[:]; bar_width=w, label="Softmax",
         title="τ = $tau", xlabel="Category", ylabel="Probability",
         ylim=(0, 1), grid=true, subplot=idx)
-    bar!(plt, x .+ w/2, gumbel_mean[:]; bar_width=w, label="Gumbel-Softmax",
+    bar!(plt, x, softmax_mean[:]; bar_width=w, label="Softmax(τ)",
+        subplot=idx)
+    bar!(plt, x .+ w, gumbel_mean[:]; bar_width=w, label="Gumbel-Softmax(τ)",
         subplot=idx)
 
     # Print statistics for this temperature
     distance = sum(abs.(softmax_mean[:] .- gumbel_mean[:]))
+    distance_plain = sum(abs.(plain_softmax_mean[:] .- gumbel_mean[:]))
     println("Temperature τ = $tau")
     println("  Gumbel-Softmax: $gumbel_mean")
-    println("  L1 distance from Softmax: $(round(distance; digits=4))\n")
+    println("  L1 distance from Softmax(τ): $(round(distance; digits=4))")
+    println("  L1 distance from Softmax:    $(round(distance_plain; digits=4))\n")
+    plt
 end
-savefig(plt, "examples/img/gumbel_softmax_demo.png")
 display(plt)
+savefig(plt, "examples/img/gumbel_softmax_demo.png")
 println("Saved figure to examples/img/gumbel_softmax_demo.png")
 
 # Additional demo: Hard vs Soft mode
